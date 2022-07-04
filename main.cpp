@@ -393,7 +393,10 @@ worker_processing (int fd_pair, char *dir)
                         }
 
                         epoll_delete_event (fd_epoll, events[i].data.fd);
-                        shutdown (events[i].data.fd, SHUT_RDWR);
+                        if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
+                            syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
+                        if (close (events[i].data.fd) == -1)
+                            syslog (LOG_ERR, "could not close the socket: %s", strerror (errno));
                     }
                 }
             }
