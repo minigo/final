@@ -351,9 +351,17 @@ worker_processing (int fd_pair, char *dir)
                 static char request [2048];
                 memset (request, '\0', 2048);
 
-                if (recv (events[i].data.fd, request, 2048, 0) == 0) {
-                    shutdown (events[i].data.fd, SHUT_RDWR);
-                } else {
+                if (recv (events[i].data.fd, request, 2048, 0) == 0)
+                {
+                    //shutdown (events[i].data.fd, SHUT_RDWR);
+                    epoll_delete_event (fd_epoll, events[i].data.fd);
+                    if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
+                        syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
+                    if (close (events[i].data.fd) == -1)
+                        syslog (LOG_ERR, "could not close the socket: %s", strerror (errno));
+                }
+                else
+                {
                     syslog (LOG_INFO, "[worker %d] receive data from client '%s'", getpid (), request);
 
                     //---- parse HTTP
