@@ -303,7 +303,11 @@ workerize (char *dir)
         close (fd_ipc[0]);
         worker_processing (fd_ipc[1], dir);
     }
-    //-- parent
+    else {
+        //-- parent
+        close (fd_ipc[1]);
+    }
+
     return fd_ipc[0];
 }
 
@@ -314,7 +318,7 @@ worker_processing (int fd_pair, char *dir)
 
     int fd_epoll = epoll_create1 (0);
     if (fd_epoll < 0) {
-        syslog (LOG_CRIT, "[worker %d] error while epoll_create1 %s", getpid (), strerror (errno));
+        syslog (LOG_CRIT, "[worker] error while epoll_create1 %s", strerror (errno));
         exit (EXIT_FAILURE);
     }
 
@@ -332,7 +336,7 @@ worker_processing (int fd_pair, char *dir)
                 shutdown (events[i].data.fd, SHUT_RDWR);
                 close (events[i].data.fd);
 
-                syslog (LOG_ERR, "[worker %d] error EPOLLERR or EPOLLHUP", getpid ());
+                syslog (LOG_ERR, "[worker] error EPOLLERR or EPOLLHUP");
             }
             //-- receive new fd from master
             else if (events[i].data.fd == fd_pair)
@@ -343,7 +347,7 @@ worker_processing (int fd_pair, char *dir)
 
                 sock_fd_read (events[i].data.fd, (void*)buff, 1, &fd_client);
 
-                syslog (LOG_INFO, "[worker %d] receive new client fd %d", getpid (), fd_client);
+                syslog (LOG_INFO, "[worker] receive new client fd %d", fd_client);
                 epoll_add_event (fd_epoll, fd_client);
             }
             //-- reveive data from somebody else
@@ -357,21 +361,23 @@ worker_processing (int fd_pair, char *dir)
                     //shutdown (events[i].data.fd, SHUT_RDWR);
 
                     epoll_delete_event (fd_epoll, events[i].data.fd);
-                    if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
-                        syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
-                    if (close (events[i].data.fd) == -1)
-                        syslog (LOG_ERR, "could not close the socket: %s", strerror (errno));
+                    if (shutdown (events[i].data.fd, SHUT_RDWR) == -1) {
+                        syslog (LOG_ERR, "[worker] could not shutdown the socket: %s", strerror (errno));
+                    }
+                    if (close (events[i].data.fd) == -1) {
+                        syslog (LOG_ERR, "[worker] could not close the socket: %s", strerror (errno));
+                    }
                 }
                 else
                 {
-                    syslog (LOG_INFO, "[worker %d] receive data from client '%s'", getpid (), request);
+                    syslog (LOG_INFO, "[worker] receive data from client '%s'", request);
 
                     //---- parse HTTP
 
                     std::unordered_map<std::string, std::string> http_request;
                     parse_header (&request[0], &request[strlen(request)], http_request);
 
-                    syslog (LOG_DEBUG, "[worker %d] path is '%s'", getpid (), http_request["Path"].c_str ());
+                    syslog (LOG_DEBUG, "[worker] path is '%s'", http_request["Path"].c_str ());
 
                     //-- пустой путь
                     if (http_request["Path"] == "/")
@@ -401,19 +407,14 @@ worker_processing (int fd_pair, char *dir)
                             send_http_responce_200 (events[i].data.fd, fbuffer, strlen (fbuffer));
                             delete [] fbuffer;
                         }
-
-                        //                        epoll_delete_event (fd_epoll, events[i].data.fd);
-                        //                        //if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
-                        //                        syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
-                        //                        //if (close (events[i].data.fd) == -1)
-                        //                        syslog (LOG_ERR, "could not close the socket: %s", strerror (errno));
                     }
 
                     epoll_delete_event (fd_epoll, events[i].data.fd);
-                    if (close (events[i].data.fd) == -1)
+                    if (close (events[i].data.fd) == -1) {
                         syslog (LOG_ERR, "[worker] could not close the socket: %s", strerror (errno));
-                    else
+                    } else {
                         syslog (LOG_ERR, "[worker] close this fucking socket");
+                    }
                 }
             }
         }
@@ -426,7 +427,7 @@ master_processing (pid_t *children, int num, const char *ip, uint16_t port, cons
     //-- create server fd
     int fd_server = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd_server == -1) {
-        syslog (LOG_CRIT, "[master %d] error while socket: %s", getpid (), strerror (errno));
+        syslog (LOG_CRIT, "[master] error while socket: %s", strerror (errno));
         exit (EXIT_FAILURE);
     }
 
@@ -439,18 +440,18 @@ master_processing (pid_t *children, int num, const char *ip, uint16_t port, cons
     set_nonblock (fd_server);
 
     if (bind (fd_server, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) == -1) {
-        syslog (LOG_CRIT, "[master %d] error while bind: %s", getpid (), strerror (errno));
+        syslog (LOG_CRIT, "[master] error while bind: %s", strerror (errno));
         exit (EXIT_FAILURE);
     }
     if (listen (fd_server, 8) == -1) {
-        syslog (LOG_CRIT, "[master %d] error while listen: %s", getpid (), strerror (errno));
+        syslog (LOG_CRIT, "[master] error while listen: %s", strerror (errno));
         exit (EXIT_FAILURE);
     }
 
     //-- creat epoll
     int fd_epoll = epoll_create1 (0);
     if (fd_epoll < 0) {
-        syslog (LOG_CRIT, "[master %d] error while epoll_create1: %s", getpid (), strerror (errno));
+        syslog (LOG_CRIT, "[master] error while epoll_create1: %s", strerror (errno));
         exit (EXIT_FAILURE);
     }
 
@@ -471,9 +472,9 @@ master_processing (pid_t *children, int num, const char *ip, uint16_t port, cons
             {
                 epoll_delete_event (fd_epoll, events[i].data.fd);
                 shutdown (events[i].data.fd, SHUT_RDWR);
-                close (events[i].data.fd);
+                //close (events[i].data.fd);
 
-                syslog (LOG_ERR, "[master %d] error EPOLLERR or EPOLLHUP", getpid ());
+                syslog (LOG_ERR, "[master] error EPOLLERR or EPOLLHUP");
             }
             else
             {
@@ -490,11 +491,13 @@ master_processing (pid_t *children, int num, const char *ip, uint16_t port, cons
                         short next_worker = queue_child++ % num;
                         sock_fd_write (children[next_worker], (void*)"0", 1, fd_client);
 
-                        syslog (LOG_INFO, "[master %d] send fd (%d) to the worker %d",
-                                getpid (), fd_client, next_worker);
+                        syslog (LOG_INFO, "[master] send fd (%d) to the worker %d",
+                                fd_client, next_worker);
+
+                        close (fd_client);
                     } else {
-                        syslog (LOG_INFO, "[master %d] error while 'accept': %s",
-                                getpid (), strerror (errno));
+                        syslog (LOG_INFO, "[master] error while 'accept': %s",
+                                strerror (errno));
                     }
                 }
             }
@@ -529,12 +532,12 @@ epoll_delete_event (int fd_epoll, int fd) {
 ssize_t
 sock_fd_write (int sock, void *buf, ssize_t buflen, int fd)
 {
-    ssize_t     size;
-    struct msghdr   msg;
-    struct iovec    iov;
+    ssize_t size;
+    struct msghdr msg;
+    struct iovec iov;
     union {
-        struct cmsghdr  cmsghdr;
-        char        control[CMSG_SPACE(sizeof (int))];
+        struct cmsghdr cmsghdr;
+        char control[CMSG_SPACE(sizeof (int))];
     } cmsgu;
     struct cmsghdr  *cmsg;
 
@@ -555,12 +558,12 @@ sock_fd_write (int sock, void *buf, ssize_t buflen, int fd)
         cmsg->cmsg_level = SOL_SOCKET;
         cmsg->cmsg_type = SCM_RIGHTS;
 
-        printf ("passing fd %d\n", fd);
+        //printf ("passing fd %d\n", fd);
         *((int *) CMSG_DATA(cmsg)) = fd;
     } else {
         msg.msg_control = NULL;
         msg.msg_controllen = 0;
-        printf ("not passing fd\n");
+        //printf ("not passing fd\n");
     }
 
     size = sendmsg (sock, &msg, 0);
@@ -601,18 +604,18 @@ sock_fd_read (int sock, void *buf, ssize_t bufsize, int *fd)
         cmsg = CMSG_FIRSTHDR(&msg);
         if (cmsg && cmsg->cmsg_len == CMSG_LEN(sizeof(int))) {
             if (cmsg->cmsg_level != SOL_SOCKET) {
-                fprintf (stderr, "invalid cmsg_level %d\n",
-                         cmsg->cmsg_level);
+                //fprintf (stderr, "invalid cmsg_level %d\n",
+                //         cmsg->cmsg_level);
                 exit(1);
             }
             if (cmsg->cmsg_type != SCM_RIGHTS) {
-                fprintf (stderr, "invalid cmsg_type %d\n",
-                         cmsg->cmsg_type);
+                //fprintf (stderr, "invalid cmsg_type %d\n",
+                //         cmsg->cmsg_type);
                 exit(1);
             }
 
             *fd = *((int *) CMSG_DATA(cmsg));
-            printf ("received fd %d\n", *fd);
+            //printf ("received fd %d\n", *fd);
         } else
             *fd = -1;
     } else {
@@ -643,10 +646,11 @@ get_workers_status ()
             return;
         }
 
-        if (WIFEXITED (status))
+        if (WIFEXITED (status)) {
             syslog (LOG_INFO, "child exited with status of %d", WEXITSTATUS(status));
-        else
+        } else {
             syslog (LOG_CRIT, "child did not exit successfully");
+        }
         return;
     }
 }
