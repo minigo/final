@@ -5,6 +5,7 @@
 #include <syslog.h>
 #include <signal.h>
 #include <sstream>
+#include <unordered_map>
 
 #include <sys/stat.h>
 #include <sys/epoll.h>
@@ -42,6 +43,48 @@ parse_http_request (char *request, char *path)
     const char *end_of_path = strchr (start_of_path, ' ');
 
     strncpy (path, start_of_path,  end_of_path - start_of_path);
+}
+
+void parse_header (const char *msg, const char *msg_end,
+                   std::unordered_map<std::string, std::string> &http_request)
+{
+    const char *head = msg;
+    const char *tail = msg;
+
+    // Find request type
+    while (tail != msg_end && *tail != ' ') ++tail;
+    http_request["Type"] = std::string(head, tail);
+
+    // Find path
+    while (tail != msg_end && *tail == ' ') ++tail;
+    head = tail;
+    while (tail != msg_end && *tail != ' ' && *tail != ':') ++tail;
+    http_request["Path"] = std::string (head, tail);
+
+    // Find HTTP version
+    while (tail != msg_end && *tail == ' ') ++tail;
+    head = tail;
+    while (tail != msg_end && *tail != '\r') ++tail;
+    http_request["Version"] = std::string(head, tail);
+    if (tail != msg_end) ++tail;  // skip '\r'
+    // TODO: what about the trailing '\n'?
+
+    // Map all headers from a key to a value
+    //    head = tail;
+    //    while (head != msg_end && *head != '\r') {
+    //        while (tail != msg_end && *tail != '\r') ++tail;
+    //        const char *colon = memchr (head, tail, ':');
+    //        if (colon == NULL) {
+    //            // TODO: malformed headers, what should happen?
+    //            break;
+    //        }
+    //        const char *value = colon+1;
+    //        while (value != tail && *value == ' ') ++value;
+    //        http_request[ std::string(head, colon) ] = std::string(value, tail);
+    //        head = tail+1;
+    //        // TODO: what about the trailing '\n'?
+    //    }
+    //return http_request;
 }
 
 //! \brief Обработчик сигналов.
@@ -114,7 +157,7 @@ main (int argc, char *argv[])
     daemonize ();
 
     //-- количество worker равно количеству ядер
-    int num_cpu = 2;//sysconf (_SC_NPROCESSORS_ONLN);
+    int num_cpu = sysconf (_SC_NPROCESSORS_ONLN);
 
     pid_t children[num_cpu];
     for (int i = 0; i < num_cpu; ++i)
@@ -252,30 +295,26 @@ worker_processing (int fd_pair, char *dir)
             //-- reveive data from somebody else
             else
             {
-                static char request [1024];
-                memset (request, '\0', 1024);
+                static char request [2048];
+                memset (request, '\0', 2048);
 
-                if (recv (events[i].data.fd, request, 1024, 0) == 0) {
+                if (recv (events[i].data.fd, request, 2048, 0) == 0) {
                     shutdown (events[i].data.fd, SHUT_RDWR);
                 } else {
                     syslog (LOG_INFO, "[worker %d] receive data from client '%s'", getpid (), request);
 
                     //---- parse HTTP
 
-                    char path [1024];
-                    memset (path, '\0', 1024);
+                    std::unordered_map<std::string, std::string> http_request;
+                    parse_header (&request[0], &request[strlen(request)], http_request);
 
-                    parse_http_request (request, path);
+                    //syslog (LOG_INFO, "[worker %d] path is '%s'", getpid (), http_request["Path"].c_str ());
 
                     //---- read file
 
-                    char full_path [2048];
-                    memset (full_path, '\0', 2048);
+                    std::string fpath = std::string (dir) + http_request["Path"];
 
-                    strncpy (full_path, dir, sizeof (dir));
-                    strncpy (&full_path[sizeof (dir)], path, sizeof (path));
-
-                    auto file = fopen (full_path, "r");
+                    auto file = fopen (fpath.c_str (), "r");
                     if (file)
                     {
                         fseek (file, 0, SEEK_END);
