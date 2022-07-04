@@ -97,13 +97,19 @@ send_http_responce_200 (int fd, const char *data, int sz)
     ss << "HTTP/1.0 200 OK";
     ss << "\r\n";
     ss << "Content-length: ";
-    ss << (sz + 1);
+    ss << sz;
     ss << "\r\n";
     ss << "Content-Type: text/html";
     ss << "\r\n\r\n";
     ss << data;
 
-    send (fd, ss.str ().c_str (), ss.str ().size (), 0);
+    if (send (fd, ss.str ().c_str (), ss.str ().size (), 0) == -1) {
+        syslog (LOG_ERR, "[send_http_responce_200] could not send responce \n%s\n%s",
+                data, strerror(errno));
+    }
+    else {
+        syslog (LOG_DEBUG, "[send_http_responce_200] responce sended \n%s", data);
+    }
 }
 
 void
@@ -121,6 +127,13 @@ send_http_responce_404 (int fd)
     ss << "\r\n\r\n";
 
     send (fd, ss.str ().c_str (), ss.str ().size (), 0);
+
+    if (send (fd, ss.str ().c_str (), ss.str ().size (), 0) == -1) {
+        syslog (LOG_ERR, "[send_http_responce_404] could not send responce %s", strerror(errno));
+    }
+    else {
+        syslog (LOG_DEBUG, "[send_http_responce_404] responce sended");
+    }
 }
 
 //! \brief Обработчик сигналов.
@@ -312,8 +325,9 @@ worker_processing (int fd_pair, char *dir)
         {
             if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP))
             {
-                shutdown (events[i].data.fd, SHUT_RDWR);
                 epoll_delete_event (fd_epoll, events[i].data.fd);
+                shutdown (events[i].data.fd, SHUT_RDWR);
+
                 syslog (LOG_ERR, "[worker %d] error EPOLLERR or EPOLLHUP", getpid ());
             }
             //-- receive new fd from master
@@ -373,6 +387,9 @@ worker_processing (int fd_pair, char *dir)
                             send_http_responce_200 (events[i].data.fd, fbuffer, lenght);
                             delete [] fbuffer;
                         }
+
+                        epoll_delete_event (fd_epoll, events[i].data.fd);
+                        shutdown (events[i].data.fd, SHUT_RDWR);
                     }
                 }
             }
