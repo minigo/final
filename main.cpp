@@ -209,7 +209,7 @@ main (int argc, char *argv[])
     daemonize ();
 
     //-- количество worker равно количеству ядер
-    int num_cpu = 1;//sysconf (_SC_NPROCESSORS_ONLN);
+    int num_cpu = sysconf (_SC_NPROCESSORS_ONLN);
 
     pid_t children[num_cpu];
     for (int i = 0; i < num_cpu; ++i)
