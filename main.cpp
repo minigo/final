@@ -63,11 +63,11 @@ void parse_header (const char *msg, const char *msg_end,
     http_request["Path"] = std::string (head, tail);
 
     // Find HTTP version
-    while (tail != msg_end && *tail == ' ') ++tail;
-    head = tail;
-    while (tail != msg_end && *tail != '\r') ++tail;
-    http_request["Version"] = std::string(head, tail);
-    if (tail != msg_end) ++tail;  // skip '\r'
+    //    while (tail != msg_end && *tail == ' ') ++tail;
+    //    head = tail;
+    //    while (tail != msg_end && *tail != '\r') ++tail;
+    //    http_request["Version"] = std::string(head, tail);
+    //    if (tail != msg_end) ++tail;  // skip '\r'
     // TODO: what about the trailing '\n'?
 
     // Map all headers from a key to a value
