@@ -354,6 +354,7 @@ worker_processing (int fd_pair, char *dir)
                 if (recv (events[i].data.fd, request, 2048, 0) == 0)
                 {
                     //shutdown (events[i].data.fd, SHUT_RDWR);
+
                     epoll_delete_event (fd_epoll, events[i].data.fd);
                     if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
                         syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
