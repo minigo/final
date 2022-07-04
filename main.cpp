@@ -381,10 +381,11 @@ worker_processing (int fd_pair, char *dir)
                             int lenght = file.tellg ();
                             file.seekg (0, file.beg);
 
-                            char *fbuffer = new char [lenght];
+                            char *fbuffer = new char [lenght + 1];
+                            memset (fbuffer, '\0', lenght + 1);
                             file.read (fbuffer, lenght);
 
-                            send_http_responce_200 (events[i].data.fd, fbuffer, lenght);
+                            send_http_responce_200 (events[i].data.fd, fbuffer, strlen (fbuffer));
                             delete [] fbuffer;
                         }
 
