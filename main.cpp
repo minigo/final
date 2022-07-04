@@ -209,7 +209,7 @@ main (int argc, char *argv[])
     daemonize ();
 
     //-- количество worker равно количеству ядер
-    int num_cpu = sysconf (_SC_NPROCESSORS_ONLN);
+    int num_cpu = 1;//sysconf (_SC_NPROCESSORS_ONLN);
 
     pid_t children[num_cpu];
     for (int i = 0; i < num_cpu; ++i)
@@ -330,6 +330,7 @@ worker_processing (int fd_pair, char *dir)
             {
                 epoll_delete_event (fd_epoll, events[i].data.fd);
                 shutdown (events[i].data.fd, SHUT_RDWR);
+                close (events[i].data.fd);
 
                 syslog (LOG_ERR, "[worker %d] error EPOLLERR or EPOLLHUP", getpid ());
             }
@@ -401,12 +402,18 @@ worker_processing (int fd_pair, char *dir)
                             delete [] fbuffer;
                         }
 
-                        epoll_delete_event (fd_epoll, events[i].data.fd);
-                        if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
-                            syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
-                        if (close (events[i].data.fd) == -1)
-                            syslog (LOG_ERR, "could not close the socket: %s", strerror (errno));
+                        //                        epoll_delete_event (fd_epoll, events[i].data.fd);
+                        //                        //if (shutdown (events[i].data.fd, SHUT_RDWR) == -1)
+                        //                        syslog (LOG_ERR, "could not shutdown the socket: %s", strerror (errno));
+                        //                        //if (close (events[i].data.fd) == -1)
+                        //                        syslog (LOG_ERR, "could not close the socket: %s", strerror (errno));
                     }
+
+                    epoll_delete_event (fd_epoll, events[i].data.fd);
+                    if (close (events[i].data.fd) == -1)
+                        syslog (LOG_ERR, "[worker] could not close the socket: %s", strerror (errno));
+                    else
+                        syslog (LOG_ERR, "[worker] close this fucking socket");
                 }
             }
         }
@@ -462,8 +469,10 @@ master_processing (pid_t *children, int num, const char *ip, uint16_t port, cons
         {
             if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP))
             {
-                shutdown (events[i].data.fd, SHUT_RDWR);
                 epoll_delete_event (fd_epoll, events[i].data.fd);
+                shutdown (events[i].data.fd, SHUT_RDWR);
+                close (events[i].data.fd);
+
                 syslog (LOG_ERR, "[master %d] error EPOLLERR or EPOLLHUP", getpid ());
             }
             else
