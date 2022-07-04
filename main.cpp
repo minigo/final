@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <sstream>
 #include <unordered_map>
+#include <fstream>
 
 #include <sys/stat.h>
 #include <sys/epoll.h>
@@ -87,6 +88,41 @@ void parse_header (const char *msg, const char *msg_end,
     //return http_request;
 }
 
+void
+send_http_responce_200 (int fd, const char *data, int sz)
+{
+    std::stringstream ss;
+
+    // Create a result with "HTTP/1.0 200 OK"
+    ss << "HTTP/1.0 200 OK";
+    ss << "\r\n";
+    ss << "Content-length: ";
+    ss << (sz + 1);
+    ss << "\r\n";
+    ss << "Content-Type: text/html";
+    ss << "\r\n\r\n";
+    ss << data;
+
+    send (fd, ss.str ().c_str (), ss.str ().size (), 0);
+}
+
+void
+send_http_responce_404 (int fd)
+{
+    std::stringstream ss;
+
+    // Create a result with "HTTP/1.0 404 NOT FOUND"
+    ss << "HTTP/1.0 404 NOT FOUND";
+    ss << "\r\n";
+    ss << "Content-length: ";
+    ss << 0;
+    ss << "\r\n";
+    ss << "Content-Type: text/html";
+    ss << "\r\n\r\n";
+
+    send (fd, ss.str ().c_str (), ss.str ().size (), 0);
+}
+
 //! \brief Обработчик сигналов.
 //!TODO: Почему мало кто применяет signalfd ?
 void
@@ -157,7 +193,7 @@ main (int argc, char *argv[])
     daemonize ();
 
     //-- количество worker равно количеству ядер
-    int num_cpu = sysconf (_SC_NPROCESSORS_ONLN);
+    int num_cpu = 1;//sysconf (_SC_NPROCESSORS_ONLN);
 
     pid_t children[num_cpu];
     for (int i = 0; i < num_cpu; ++i)
@@ -308,53 +344,35 @@ worker_processing (int fd_pair, char *dir)
                     std::unordered_map<std::string, std::string> http_request;
                     parse_header (&request[0], &request[strlen(request)], http_request);
 
-                    //syslog (LOG_INFO, "[worker %d] path is '%s'", getpid (), http_request["Path"].c_str ());
+                    syslog (LOG_DEBUG, "[worker %d] path is '%s'", getpid (), http_request["Path"].c_str ());
 
-                    //---- read file
-
-                    std::string fpath = std::string (dir) + http_request["Path"];
-
-                    auto file = fopen (fpath.c_str (), "r");
-                    if (file)
+                    //-- пустой путь
+                    if (http_request["Path"] == "/")
                     {
-                        fseek (file, 0, SEEK_END);
-                        long fsize = ftell (file);
-                        fseek (file, 0, SEEK_SET);  /* same as rewind(f); */
-
-                        char *string = (char*)malloc (fsize + 1);
-                        fread (string, fsize, 1, file);
-                        fclose (file);
-
-                        string[fsize] = 0;
-
-                        std::stringstream ss;
-
-                        // Create a result with "HTTP/1.0 200 OK"
-                        ss << "HTTP/1.0 200 OK";
-                        ss << "\r\n";
-                        ss << "Content-length: ";
-                        ss << (fsize + 1);
-                        ss << "\r\n";
-                        ss << "Content-Type: text/html";
-                        ss << "\r\n\r\n";
-                        ss << string;
-
-                        send (events[i].data.fd, ss.str ().c_str (), ss.str ().size (), 0);
+                        send_http_responce_404 (events[i].data.fd);
                     }
                     else
                     {
-                        std::stringstream ss;
+                        //---- read file
 
-                        // Create a result with "HTTP/1.0 404 NOT FOUND"
-                        ss << "HTTP/1.0 404 NOT FOUND";
-                        ss << "\r\n";
-                        ss << "Content-length: ";
-                        ss << 0;
-                        ss << "\r\n";
-                        ss << "Content-Type: text/html";
-                        ss << "\r\n\r\n";
+                        std::string fpath = std::string (dir) + http_request["Path"];
+                        std::ifstream file (fpath);
+                        if (!file)
+                        {
+                            send_http_responce_404 (events[i].data.fd);
+                        }
+                        else
+                        {
+                            file.seekg (0, file.end);
+                            int lenght = file.tellg ();
+                            file.seekg (0, file.beg);
 
-                        send (events[i].data.fd, ss.str ().c_str (), ss.str ().size (), 0);
+                            char *fbuffer = new char [lenght];
+                            file.read (fbuffer, lenght);
+
+                            send_http_responce_200 (events[i].data.fd, fbuffer, lenght);
+                            delete [] fbuffer;
+                        }
                     }
                 }
             }
