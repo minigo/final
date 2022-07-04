@@ -59,7 +59,7 @@ void parse_header (const char *msg, const char *msg_end,
     // Find path
     while (tail != msg_end && *tail == ' ') ++tail;
     head = tail;
-    while (tail != msg_end && *tail != ' ' && *tail != ':') ++tail;
+    while (tail != msg_end && *tail != ' ' && *tail != '?') ++tail;
     http_request["Path"] = std::string (head, tail);
 
     // Find HTTP version
@@ -99,6 +99,8 @@ send_http_responce_200 (int fd, const char *data, int sz)
     ss << "Content-length: ";
     ss << sz;
     ss << "\r\n";
+    ss << "Connection: close";
+    ss << "\r\n";
     ss << "Content-Type: text/html";
     ss << "\r\n\r\n";
     ss << data;
@@ -123,6 +125,7 @@ send_http_responce_404 (int fd)
     ss << "Content-length: ";
     ss << 0;
     ss << "\r\n";
+    ss << "Connection: close";
     ss << "Content-Type: text/html";
     ss << "\r\n\r\n";
 
