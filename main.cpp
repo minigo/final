@@ -15,6 +15,8 @@
 #include <sys/wait.h>
 #include <arpa/inet.h>
 
+#include "fd_passing.h"
+
 static const int max_events {32};
 
 void
@@ -32,10 +34,6 @@ void
 daemonize ();
 pid_t
 workerize (char *dir);
-ssize_t
-sock_fd_write (int sock, void *buf, ssize_t buflen, int fd);
-ssize_t
-sock_fd_read (int sock, void *buf, ssize_t bufsize, int *fd);
 
 void
 parse_http_request (char *request, char *path)
@@ -61,31 +59,6 @@ void parse_header (const char *msg, const char *msg_end,
     head = tail;
     while (tail != msg_end && *tail != ' ' && *tail != '?') ++tail;
     http_request["Path"] = std::string (head, tail);
-
-    // Find HTTP version
-    //    while (tail != msg_end && *tail == ' ') ++tail;
-    //    head = tail;
-    //    while (tail != msg_end && *tail != '\r') ++tail;
-    //    http_request["Version"] = std::string(head, tail);
-    //    if (tail != msg_end) ++tail;  // skip '\r'
-    // TODO: what about the trailing '\n'?
-
-    // Map all headers from a key to a value
-    //    head = tail;
-    //    while (head != msg_end && *head != '\r') {
-    //        while (tail != msg_end && *tail != '\r') ++tail;
-    //        const char *colon = memchr (head, tail, ':');
-    //        if (colon == NULL) {
-    //            // TODO: malformed headers, what should happen?
-    //            break;
-    //        }
-    //        const char *value = colon+1;
-    //        while (value != tail && *value == ' ') ++value;
-    //        http_request[ std::string(head, colon) ] = std::string(value, tail);
-    //        head = tail+1;
-    //        // TODO: what about the trailing '\n'?
-    //    }
-    //return http_request;
 }
 
 void
@@ -172,20 +145,20 @@ main (int argc, char *argv[])
     }
 
     if (!h) {
-        std::cerr << "incorrect ip address" << std::endl;
+        std::cerr << "[main] incorrect ip address" << std::endl;
         return EXIT_FAILURE;
     }
     if (!p) {
-        std::cerr << "incorrect port" << std::endl;
+        std::cerr << "[main] incorrect port" << std::endl;
         return EXIT_FAILURE;
     }
     uint16_t port = atoi (p);
     if (port == 0) {
-        std::cerr << "incorrect port" << std::endl;
+        std::cerr << "[main] incorrect port" << std::endl;
         return EXIT_FAILURE;
     }
     if (!d) {
-        std::cerr << "incorrect directory" << std::endl;
+        std::cerr << "[main] incorrect directory" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -194,22 +167,22 @@ main (int argc, char *argv[])
     act.sa_sigaction = sig_handler;
     act.sa_flags = SA_SIGINFO;
     if (sigaction (SIGINT, &act, NULL) == -1) {
-        std::cerr << "error while sigaction (SIGINT): " << strerror (errno) << std::endl;
+        std::cerr << "[main] error while sigaction (SIGINT): " << strerror (errno) << std::endl;
         return EXIT_FAILURE;
     }
     if (sigaction (SIGHUP, &act, NULL) == -1) {
-        std::cerr << "error while sigaction (SIGHUP): " << strerror (errno) << std::endl;
+        std::cerr << "[main] error while sigaction (SIGHUP): " << strerror (errno) << std::endl;
         return EXIT_FAILURE;
     }
     if (sigaction (SIGCHLD, &act, NULL) == -1) {
-        std::cerr << "error while sigaction (SIGCHLD): " << strerror (errno) << std::endl;
+        std::cerr << "[main] error while sigaction (SIGCHLD): " << strerror (errno) << std::endl;
         return EXIT_FAILURE;
     }
 
     daemonize ();
 
     //-- количество worker равно количеству ядер
-    int num_cpu = 1;//sysconf (_SC_NPROCESSORS_ONLN);
+    int num_cpu = sysconf (_SC_NPROCESSORS_ONLN);
 
     pid_t children[num_cpu];
     for (int i = 0; i < num_cpu; ++i)
@@ -225,16 +198,16 @@ void
 sig_handler (int signum, siginfo_t * siginfo, void *code)
 {
     if (signum == SIGHUP) {
-        syslog (LOG_INFO, "no action for SIGHUP while");
+        syslog (LOG_INFO, "[sig_handler] no action for SIGHUP while");
     } else if (signum == SIGINT && signum == SIGQUIT) {
-        syslog (LOG_INFO, "by-by baby");
+        syslog (LOG_INFO, "[sig_handler] by-by baby");
         closelog ();
         exit (EXIT_SUCCESS);
     } else if (SIGCHLD) {
-        syslog (LOG_INFO, "receive SIGCHLD signal");
+        syslog (LOG_INFO, "[sig_handler] receive SIGCHLD signal");
         get_workers_status ();
     } else {
-        syslog (LOG_INFO, "no action for signal %d while", signum);
+        syslog (LOG_INFO, "[sig_handler] no action for signal %d while", signum);
     }
 }
 
@@ -347,7 +320,7 @@ worker_processing (int fd_pair, char *dir)
 
                 sock_fd_read (events[i].data.fd, (void*)buff, 1, &fd_client);
 
-                syslog (LOG_INFO, "[worker] receive new client fd %d", fd_client);
+                syslog (LOG_DEBUG, "[worker] receive new client fd %d", fd_client);
                 epoll_add_event (fd_epoll, fd_client);
             }
             //-- reveive data from somebody else
@@ -370,7 +343,7 @@ worker_processing (int fd_pair, char *dir)
                 }
                 else
                 {
-                    syslog (LOG_INFO, "[worker] receive data from client '%s'", request);
+                    syslog (LOG_DEBUG, "[worker] receive data from client '%s'", request);
 
                     //---- parse HTTP
 
@@ -508,7 +481,7 @@ master_processing (pid_t *children, int num, const char *ip, uint16_t port, cons
 void
 set_nonblock (int fd) {
     if (fcntl (fd, F_SETFL, fcntl (fd, F_GETFL, 0) | O_NONBLOCK) < 0) {
-        syslog (LOG_CRIT, "error while set_nonblock: %s", strerror (errno));
+        syslog (LOG_CRIT, "[set_nonblock] error while set_nonblock: %s", strerror (errno));
         exit (EXIT_FAILURE);
     }
 }
@@ -529,105 +502,6 @@ epoll_delete_event (int fd_epoll, int fd) {
     epoll_ctl (fd_epoll, EPOLL_CTL_DEL, fd, &eventd);
 }
 
-ssize_t
-sock_fd_write (int sock, void *buf, ssize_t buflen, int fd)
-{
-    ssize_t size;
-    struct msghdr msg;
-    struct iovec iov;
-    union {
-        struct cmsghdr cmsghdr;
-        char control[CMSG_SPACE(sizeof (int))];
-    } cmsgu;
-    struct cmsghdr  *cmsg;
-
-    iov.iov_base = buf;
-    iov.iov_len = buflen;
-
-    msg.msg_name = NULL;
-    msg.msg_namelen = 0;
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-
-    if (fd != -1) {
-        msg.msg_control = cmsgu.control;
-        msg.msg_controllen = sizeof(cmsgu.control);
-
-        cmsg = CMSG_FIRSTHDR(&msg);
-        cmsg->cmsg_len = CMSG_LEN(sizeof (int));
-        cmsg->cmsg_level = SOL_SOCKET;
-        cmsg->cmsg_type = SCM_RIGHTS;
-
-        //printf ("passing fd %d\n", fd);
-        *((int *) CMSG_DATA(cmsg)) = fd;
-    } else {
-        msg.msg_control = NULL;
-        msg.msg_controllen = 0;
-        //printf ("not passing fd\n");
-    }
-
-    size = sendmsg (sock, &msg, 0);
-
-    if (size < 0)
-        perror ("sendmsg");
-    return size;
-}
-
-ssize_t
-sock_fd_read (int sock, void *buf, ssize_t bufsize, int *fd)
-{
-    ssize_t     size;
-
-    if (fd) {
-        struct msghdr   msg;
-        struct iovec    iov;
-        union {
-            struct cmsghdr  cmsghdr;
-            char        control[CMSG_SPACE(sizeof (int))];
-        } cmsgu;
-        struct cmsghdr  *cmsg;
-
-        iov.iov_base = buf;
-        iov.iov_len = bufsize;
-
-        msg.msg_name = NULL;
-        msg.msg_namelen = 0;
-        msg.msg_iov = &iov;
-        msg.msg_iovlen = 1;
-        msg.msg_control = cmsgu.control;
-        msg.msg_controllen = sizeof(cmsgu.control);
-        size = recvmsg (sock, &msg, 0);
-        if (size < 0) {
-            perror ("recvmsg");
-            exit(1);
-        }
-        cmsg = CMSG_FIRSTHDR(&msg);
-        if (cmsg && cmsg->cmsg_len == CMSG_LEN(sizeof(int))) {
-            if (cmsg->cmsg_level != SOL_SOCKET) {
-                //fprintf (stderr, "invalid cmsg_level %d\n",
-                //         cmsg->cmsg_level);
-                exit(1);
-            }
-            if (cmsg->cmsg_type != SCM_RIGHTS) {
-                //fprintf (stderr, "invalid cmsg_type %d\n",
-                //         cmsg->cmsg_type);
-                exit(1);
-            }
-
-            *fd = *((int *) CMSG_DATA(cmsg));
-            //printf ("received fd %d\n", *fd);
-        } else
-            *fd = -1;
-    } else {
-        size = read (sock, buf, bufsize);
-        if (size < 0) {
-            perror ("read");
-            exit (1);
-        }
-    }
-    return size;
-}
-
 static void
 get_workers_status ()
 {
@@ -642,14 +516,14 @@ get_workers_status ()
             return;
 
         if (pid == -1) {
-            syslog (LOG_CRIT, "error while waitpid %s", strerror (errno));
+            syslog (LOG_CRIT, "[get_workers_status] error while 'waitpid': %s", strerror (errno));
             return;
         }
 
         if (WIFEXITED (status)) {
-            syslog (LOG_INFO, "child exited with status of %d", WEXITSTATUS(status));
+            syslog (LOG_INFO, "[get_workers_status] child exited with status of %d", WEXITSTATUS(status));
         } else {
-            syslog (LOG_CRIT, "child did not exit successfully");
+            syslog (LOG_DEBUG, "[get_workers_status] child did not exit successfully");
         }
         return;
     }
